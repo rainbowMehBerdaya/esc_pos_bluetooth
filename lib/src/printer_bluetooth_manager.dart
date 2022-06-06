@@ -29,16 +29,18 @@ class PrinterBluetoothManager {
   final BluetoothManager _bluetoothManager = BluetoothManager.instance;
   bool _isPrinting = false;
   bool _isConnected = false;
+  bool _supportBLE = true;
   StreamSubscription? _scanResultsSubscription;
   StreamSubscription? _isScanningSubscription;
   PrinterBluetooth? _selectedPrinter;
 
+  bool get supportBLE => _supportBLE;
   final BehaviorSubject<bool> _isScanning = BehaviorSubject.seeded(false);
   Stream<bool> get isScanningStream => _isScanning.stream;
-
-  final BehaviorSubject<List<PrinterBluetooth>> _scanResults =
-      BehaviorSubject.seeded([]);
+  final BehaviorSubject<List<PrinterBluetooth>> _scanResults = BehaviorSubject.seeded([]);
   Stream<List<PrinterBluetooth>> get scanResults => _scanResults.stream;
+  final BehaviorSubject<List<PrinterBluetooth>> _scanResultsNonScan = BehaviorSubject.seeded([]);
+  Stream<List<PrinterBluetooth>> get scanResultsNonScan => _scanResultsNonScan.stream;
 
   Future _runDelayed(int seconds) {
     return Future<dynamic>.delayed(Duration(seconds: seconds));
@@ -53,8 +55,7 @@ class PrinterBluetoothManager {
       _scanResults.add(devices.map((d) => PrinterBluetooth(d)).toList());
     });
 
-    _isScanningSubscription =
-        _bluetoothManager.isScanning.listen((isScanningCurrent) async {
+    _isScanningSubscription = _bluetoothManager.isScanning.listen((isScanningCurrent) async {
       // If isScanning value changed (scan just stopped)
       if (_isScanning.value && !isScanningCurrent) {
         _scanResultsSubscription!.cancel();
@@ -62,6 +63,42 @@ class PrinterBluetoothManager {
       }
       _isScanning.add(isScanningCurrent);
     });
+  }
+
+  Future<bool> enablePermission() async {
+    try {
+      return await _bluetoothManager.enablePermission();
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  Future<bool> enableBluetooth() async {
+    try {
+      return await _bluetoothManager.enableBluetooth();
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  Future<bool> checkSupportBLE() async {
+    try {
+      _supportBLE = await _bluetoothManager.checkSupportBLE();
+      // _supportBLE = false;
+      return _supportBLE;
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  Future<List<PrinterBluetooth>> getBondedDevice() async {
+    try {
+      List<BluetoothDevice> listBluetoothDevices = await _bluetoothManager.getBondedDevice();
+      _scanResultsNonScan.add(listBluetoothDevices.map((d) => PrinterBluetooth(d)).toList());
+      return _scanResultsNonScan.value;
+    } catch (e) {
+      throw e;
+    }
   }
 
   void stopScan() async {
@@ -90,9 +127,11 @@ class PrinterBluetoothManager {
 
     _isPrinting = true;
 
-    // We have to rescan before connecting, otherwise we can connect only once
-    await _bluetoothManager.startScan(timeout: Duration(seconds: 1));
-    await _bluetoothManager.stopScan();
+    if (supportBLE) {
+      // We have to rescan before connecting, otherwise we can connect only once
+      await _bluetoothManager.startScan(timeout: Duration(seconds: 1));
+      await _bluetoothManager.stopScan();
+    }
 
     // Connect
     await _bluetoothManager.connect(_selectedPrinter!._device);
