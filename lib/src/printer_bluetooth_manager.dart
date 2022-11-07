@@ -124,7 +124,7 @@ class PrinterBluetoothManager {
   }) async {
     final Completer<PosPrintResult> completer = Completer();
 
-    const int timeout = 5;
+    const int timeout = 12;
     if (_selectedPrinter == null) {
       return Future<PosPrintResult>.value(PosPrintResult.printerNotSelected);
     } else if (_isScanning.value) {
@@ -181,7 +181,7 @@ class PrinterBluetoothManager {
             _disconnectBluetoothTimer.cancel();
           }
 
-          _disconnectBluetoothTimer = Timer(Duration(seconds: 3), () async {
+          _disconnectBluetoothTimer = Timer(Duration(seconds: 10), () async {
             // print('disconnectBluetoothTimer');
             if (_isConnected) {
               // print('disconnect');
