@@ -147,62 +147,125 @@ class PrinterBluetoothManager {
       await _bluetoothManager.connect(_selectedPrinter!._device);
     }
 
-    // Subscribe to the events
-    _bluetoothManager.state.listen((state) async {
-      // print('state: $state');
-      switch (state) {
-        case 12:
-          if (_isConnected) {
-            continue continueThis;
-          }
-          break;
-        continueThis:
-        case BluetoothManager.CONNECTED:
-          _isConnected = true;
-
-          final len = bytes.length;
-          List<List<int>> chunks = [];
-          for (var i = 0; i < len; i += chunkSizeBytes) {
-            var end = (i + chunkSizeBytes < len) ? i + chunkSizeBytes : len;
-            chunks.add(bytes.sublist(i, end));
-          }
-
-          for (var i = 0; i < chunks.length; i += 1) {
-            await _bluetoothManager.writeData(chunks[i]);
-            sleep(Duration(milliseconds: queueSleepTimeMs));
-          }
-
-          // print('success');
-          completer.complete(PosPrintResult.success);
-          _isPrinting = false;
-
-          // TODO sending disconnect signal should be event-based
-          if (_disconnectBluetoothTimer.isActive) {
-            _disconnectBluetoothTimer.cancel();
-          }
-
-          _disconnectBluetoothTimer = Timer(Duration(seconds: 10), () async {
-            // print('disconnectBluetoothTimer');
+    // ISSUE WITH IOS, PRINT MULTIPLE TIMES
+    if (Platform.isAndroid) {
+      // Subscribe to the events
+      _bluetoothManager.state.listen((state) async {
+        switch (state) {
+          case 12:
             if (_isConnected) {
-              // print('disconnect');
-              await _bluetoothManager.disconnect();
+              continue continueThis;
             }
-          });
+            break;
+          continueThis:
+          case BluetoothManager.CONNECTED:
+            _isConnected = true;
 
-          // _runDelayed(1000).then((dynamic v) async {
-          //   await _bluetoothManager.disconnect();
-          //   _isPrinting = false;
-          // });
+            final len = bytes.length;
+            List<List<int>> chunks = [];
+            for (var i = 0; i < len; i += chunkSizeBytes) {
+              var end = (i + chunkSizeBytes < len) ? i + chunkSizeBytes : len;
+              chunks.add(bytes.sublist(i, end));
+            }
 
-          // _isConnected = true;
-          break;
-        case BluetoothManager.DISCONNECTED:
-          _isConnected = false;
-          break;
-        default:
-          break;
-      }
-    });
+            for (var i = 0; i < chunks.length; i += 1) {
+              await _bluetoothManager.writeData(chunks[i]);
+              sleep(Duration(milliseconds: queueSleepTimeMs));
+            }
+
+            // print('success');
+            completer.complete(PosPrintResult.success);
+            _isPrinting = false;
+
+            // TODO sending disconnect signal should be event-based
+            if (_disconnectBluetoothTimer.isActive) {
+              _disconnectBluetoothTimer.cancel();
+            }
+
+            _disconnectBluetoothTimer = Timer(Duration(seconds: 10), () async {
+              // print('disconnectBluetoothTimer');
+              if (_isConnected) {
+                // print('disconnect');
+                await _bluetoothManager.disconnect();
+              }
+            });
+
+            // _runDelayed(1000).then((dynamic v) async {
+            //   await _bluetoothManager.disconnect();
+            //   _isPrinting = false;
+            // });
+
+            // _isConnected = true;
+            break;
+          case BluetoothManager.DISCONNECTED:
+            _isConnected = false;
+            break;
+          default:
+            break;
+        }
+      });
+    } else if (Platform.isIOS) {
+      // Subscribe to the events
+      _bluetoothManager.state.listen((state) async {
+        // print('state: $state');
+        // print('_isConnected: $_isConnected');
+        // print('_isPrinting: $_isPrinting');
+        switch (state) {
+          case null:
+            if (_isConnected) {
+              continue continueThis;
+            }
+            break;
+          continueThis:
+          case BluetoothManager.CONNECTED:
+            _isConnected = true;
+
+            if(_isPrinting == true) {
+              final len = bytes.length;
+              List<List<int>> chunks = [];
+              for (var i = 0; i < len; i += chunkSizeBytes) {
+                var end = (i + chunkSizeBytes < len) ? i + chunkSizeBytes : len;
+                chunks.add(bytes.sublist(i, end));
+              }
+
+              for (var i = 0; i < chunks.length; i += 1) {
+                await _bluetoothManager.writeData(chunks[i]);
+                sleep(Duration(milliseconds: queueSleepTimeMs));
+              }
+            }
+
+            // print('success');
+            completer.complete(PosPrintResult.success);
+            _isPrinting = false;
+
+            // TODO sending disconnect signal should be event-based
+            if (_disconnectBluetoothTimer.isActive) {
+              _disconnectBluetoothTimer.cancel();
+            }
+
+            _disconnectBluetoothTimer = Timer(Duration(seconds: 10), () async {
+              // print('disconnectBluetoothTimer');
+              if (_isConnected) {
+                // print('disconnect');
+                await _bluetoothManager.disconnect();
+              }
+            });
+
+            // _runDelayed(1000).then((dynamic v) async {
+            //   await _bluetoothManager.disconnect();
+            //   _isPrinting = false;
+            // });
+
+            // _isConnected = true;
+            break;
+          case BluetoothManager.DISCONNECTED:
+            _isConnected = false;
+            break;
+          default:
+            break;
+        }
+      });
+    }
 
     // Printing timeout
     if (_timeoutTimer.isActive) {
