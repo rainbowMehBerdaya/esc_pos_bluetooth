@@ -25,6 +25,8 @@ class PrinterBluetooth {
   String? get address => _device.address;
 
   int? get type => _device.type;
+
+  Map<String, dynamic> get toJson => _device.toJson();
 }
 
 /// Printer Bluetooth Manager
