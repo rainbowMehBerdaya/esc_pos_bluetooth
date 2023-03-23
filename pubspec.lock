@@ -77,8 +77,8 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: updated
-      resolved-ref: "9453fd044873a6e2acd62220b4e36adadc65ff10"
+      ref: "826ff5e2b2fc753e1583980ffb6e0b3fda6dbef9"
+      resolved-ref: "826ff5e2b2fc753e1583980ffb6e0b3fda6dbef9"
       url: "https://github.com/rainbowMehBerdaya/esc_pos_utils.git"
     source: git
     version: "1.1.0"
@@ -99,7 +99,7 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: updated
+      ref: "80bffcf453557168297d85687ee808966b3e2d25"
       resolved-ref: "80bffcf453557168297d85687ee808966b3e2d25"
       url: "https://github.com/rainbowMehBerdaya/flutter_bluetooth_basic.git"
     source: git
