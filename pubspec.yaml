@@ -15,7 +15,7 @@ dependencies:
   esc_pos_utils:
     git:
       url: https://github.com/rainbowMehBerdaya/esc_pos_utils.git
-      ref: 826ff5e2b2fc753e1583980ffb6e0b3fda6dbef9
+      ref: 6824eeb44a61d9e4ecacf431cc747b885b3128f9
 #  flutter_bluetooth_basic: ^0.1.7
   flutter_bluetooth_basic:
     git:
