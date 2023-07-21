@@ -11,16 +11,16 @@ dependencies:
   flutter:
     sdk: flutter
   rxdart: ^0.27.7
-#  esc_pos_utils: ^1.1.0
   esc_pos_utils:
-    git:
-      url: https://github.com/rainbowMehBerdaya/esc_pos_utils.git
-      ref: 6824eeb44a61d9e4ecacf431cc747b885b3128f9
-#  flutter_bluetooth_basic: ^0.1.7
+#    path: /Users/lysandergustin/Projects/AndroidStudioProjects/esc_pos_utils
+      git:
+        url: https://github.com/rainbowMehBerdaya/esc_pos_utils.git
+        ref: afcc61a40eacd3bd49d9df48e210dfe1ba62e42b
   flutter_bluetooth_basic:
+#    path: /Users/lysandergustin/Projects/AndroidStudioProjects/flutter_bluetooth_basic
     git:
       url: https://github.com/rainbowMehBerdaya/flutter_bluetooth_basic.git
-      ref: 80bffcf453557168297d85687ee808966b3e2d25
+      ref: 89238039d1392b7d327f56d6fd77322dfbd81637
 
 dev_dependencies:
   flutter_test:
