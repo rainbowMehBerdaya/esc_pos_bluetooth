@@ -40,6 +40,7 @@ class PrinterBluetoothManager {
   StreamSubscription? _scanResultsSubscription;
   StreamSubscription? _isScanningSubscription;
   PrinterBluetooth? _selectedPrinter;
+  bool _changeConnection = false;
 
   bool get supportBLE => _supportBLE;
   final BehaviorSubject<bool> _isScanning = BehaviorSubject.seeded(false);
@@ -116,6 +117,10 @@ class PrinterBluetoothManager {
   }
 
   void selectPrinter(PrinterBluetooth printer) {
+    if (printer != _selectedPrinter) {
+      _changeConnection = true;
+    }
+
     _selectedPrinter = printer;
   }
 
@@ -137,6 +142,18 @@ class PrinterBluetoothManager {
     // }
 
     _isPrinting = true;
+
+    if (_changeConnection) {
+      _changeConnection = false;
+      if (_disconnectBluetoothTimer.isActive) {
+        _disconnectBluetoothTimer.cancel();
+      }
+
+      if (_isConnected) {
+        await _bluetoothManager.disconnect();
+        _isConnected = false;
+      }
+    }
 
     if (!_isConnected) {
       if (supportBLE) {
