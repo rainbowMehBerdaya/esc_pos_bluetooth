@@ -15,7 +15,7 @@ dependencies:
 #    path: /Users/lysandergustin/Projects/AndroidStudioProjects/esc_pos_utils
       git:
         url: https://github.com/rainbowMehBerdaya/esc_pos_utils.git
-        ref: afcc61a40eacd3bd49d9df48e210dfe1ba62e42b
+        ref: 3e827d7d0649e8e427de9f0658a2fb59ef9ab3a8
   flutter_bluetooth_basic:
 #    path: /Users/lysandergustin/Projects/AndroidStudioProjects/flutter_bluetooth_basic
     git:
