@@ -9,6 +9,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:esc_pos_utils/esc_pos_utils.dart';
 import 'package:flutter_bluetooth_basic/flutter_bluetooth_basic.dart';
 import 'package:rxdart/rxdart.dart';
 
@@ -40,6 +41,7 @@ class PrinterBluetoothManager {
   StreamSubscription? _scanResultsSubscription;
   StreamSubscription? _isScanningSubscription;
   PrinterBluetooth? _selectedPrinter;
+  CapabilityProfile? _capabilityProfile;
   bool _changeConnection = false;
 
   bool get supportBLE => _supportBLE;
@@ -116,9 +118,13 @@ class PrinterBluetoothManager {
     await _bluetoothManager.stopScan();
   }
 
-  void selectPrinter(PrinterBluetooth printer) {
+  void selectPrinter(PrinterBluetooth printer, CapabilityProfile? capabilityProfile) {
     if (printer != _selectedPrinter) {
       _changeConnection = true;
+    }
+
+    if (capabilityProfile != null) {
+      _capabilityProfile = capabilityProfile;
     }
 
     _selectedPrinter = printer;
@@ -144,12 +150,14 @@ class PrinterBluetoothManager {
     _isPrinting = true;
 
     if (_changeConnection) {
+      print('changeConnection: $_changeConnection');
       _changeConnection = false;
       if (_disconnectBluetoothTimer.isActive) {
         _disconnectBluetoothTimer.cancel();
       }
 
       if (_isConnected) {
+        print('_isConnected: $_isConnected');
         await _bluetoothManager.disconnect();
         _isConnected = false;
       }
@@ -163,18 +171,28 @@ class PrinterBluetoothManager {
       }
 
       // Connect
-      await _bluetoothManager.connect(_selectedPrinter!._device);
+      if (_capabilityProfile != null && _capabilityProfile!.name == 'IMIN-USB') {
+        await _bluetoothManager.connectUSB();
+      } else {
+        await _bluetoothManager.connect(_selectedPrinter!._device);
+      }
     }
 
     // ISSUE WITH IOS, PRINT MULTIPLE TIMES
     if (Platform.isAndroid) {
       // Subscribe to the events
       _bluetoothManager.state.listen((state) async {
+        // print('state asd: $state');
         switch (state) {
           case 12:
             if (_isConnected) {
               continue continueThis;
             }
+
+            if (_capabilityProfile != null && _capabilityProfile!.name == 'IMIN-USB') {
+              continue continueThis;
+            }
+
             break;
           continueThis:
           case BluetoothManager.CONNECTED:
@@ -206,6 +224,10 @@ class PrinterBluetoothManager {
               if (_isConnected) {
                 // print('disconnect');
                 await _bluetoothManager.disconnect();
+
+                if (_capabilityProfile != null && _capabilityProfile!.name == 'IMIN-USB') {
+                  _isConnected = false;
+                }
               }
             });
 
