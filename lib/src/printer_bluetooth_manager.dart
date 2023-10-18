@@ -150,14 +150,14 @@ class PrinterBluetoothManager {
     _isPrinting = true;
 
     if (_changeConnection) {
-      print('changeConnection: $_changeConnection');
+      // print('changeConnection: $_changeConnection');
       _changeConnection = false;
       if (_disconnectBluetoothTimer.isActive) {
         _disconnectBluetoothTimer.cancel();
       }
 
       if (_isConnected) {
-        print('_isConnected: $_isConnected');
+        // print('_isConnected: $_isConnected');
         await _bluetoothManager.disconnect();
         _isConnected = false;
       }
