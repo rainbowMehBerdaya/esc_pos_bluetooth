@@ -182,7 +182,6 @@ class PrinterBluetoothManager {
     if (Platform.isAndroid) {
       // Subscribe to the events
       _bluetoothManager.state.listen((state) async {
-        // print('state asd: $state');
         switch (state) {
           case 12:
             if (_isConnected) {
@@ -261,7 +260,7 @@ class PrinterBluetoothManager {
           case BluetoothManager.CONNECTED:
             _isConnected = true;
 
-            if(_isPrinting == true) {
+            if (_isPrinting == true) {
               final len = bytes.length;
               List<List<int>> chunks = [];
               for (var i = 0; i < len; i += chunkSizeBytes) {
