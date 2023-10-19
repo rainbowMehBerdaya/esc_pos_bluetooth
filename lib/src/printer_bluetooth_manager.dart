@@ -159,6 +159,18 @@ class PrinterBluetoothManager {
       if (_isConnected) {
         // print('_isConnected: $_isConnected');
         await _bluetoothManager.disconnect();
+
+        if (Platform.isAndroid) {
+          final bool _isBluetoothDisconnectSuccess = await _bluetoothDisconnectSuccess();
+
+          // _isBluetoothDisconnectSuccess is still not utilize
+          // if (_isBluetoothDisconnectSuccess) {
+          //   print('success');
+          // } else {
+          //   print('failed');
+          // }
+        }
+
         _isConnected = false;
       }
     }
@@ -238,6 +250,7 @@ class PrinterBluetoothManager {
             // _isConnected = true;
             break;
           case BluetoothManager.DISCONNECTED:
+            print('disconnected');
             _isConnected = false;
             break;
           default:
@@ -345,5 +358,28 @@ class PrinterBluetoothManager {
       chunkSizeBytes: chunkSizeBytes,
       queueSleepTimeMs: queueSleepTimeMs,
     );
+  }
+
+  Future<bool> _bluetoothDisconnectSuccess() async {
+    final Completer<bool> completer = Completer();
+
+    if (Platform.isAndroid) {
+      // Subscribe to the events
+      _bluetoothManager.state.listen((state) async {
+        switch (state) {
+          case BluetoothManager.DISCONNECTED:
+            completer.complete(true);
+            break;
+          default:
+            break;
+        }
+      });
+    }
+
+    _timeoutTimer = Timer(Duration(seconds: 5), () async {
+      completer.complete(false);
+    });
+
+    return completer.future;
   }
 }
