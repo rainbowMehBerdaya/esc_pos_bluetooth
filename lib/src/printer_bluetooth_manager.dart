@@ -250,7 +250,7 @@ class PrinterBluetoothManager {
             // _isConnected = true;
             break;
           case BluetoothManager.DISCONNECTED:
-            print('disconnected');
+            // print('disconnected');
             _isConnected = false;
             break;
           default:
