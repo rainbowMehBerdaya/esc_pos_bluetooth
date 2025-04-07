@@ -204,6 +204,10 @@ class PrinterBluetoothManager {
               continue continueThis;
             }
 
+            if (_capabilityProfile != null && _capabilityProfile!.name == 'DEVICE') {
+              continue continueThis;
+            }
+
             break;
           continueThis:
           case BluetoothManager.CONNECTED:
@@ -225,29 +229,35 @@ class PrinterBluetoothManager {
             completer.complete(PosPrintResult.success);
             _isPrinting = false;
 
-            // TODO sending disconnect signal should be event-based
-            if (_disconnectBluetoothTimer.isActive) {
-              _disconnectBluetoothTimer.cancel();
+            if (_capabilityProfile?.name != 'DEVICE') {
+              // TODO sending disconnect signal should be event-based
+              if (_disconnectBluetoothTimer.isActive) {
+                _disconnectBluetoothTimer.cancel();
+              }
+
+              _disconnectBluetoothTimer = Timer(Duration(seconds: 10), () async {
+                // print('disconnectBluetoothTimer');
+                if (_isConnected) {
+                  // print('disconnect');
+                  await _bluetoothManager.disconnect();
+
+                  if (_capabilityProfile != null && _capabilityProfile!.name == 'IMIN-USB') {
+                    _isConnected = false;
+                  }
+                }
+              });
+
+              // _runDelayed(1000).then((dynamic v) async {
+              //   await _bluetoothManager.disconnect();
+              //   _isPrinting = false;
+              // });
+
+              // _isConnected = true;
             }
 
-            _disconnectBluetoothTimer = Timer(Duration(seconds: 10), () async {
-              // print('disconnectBluetoothTimer');
-              if (_isConnected) {
-                // print('disconnect');
-                await _bluetoothManager.disconnect();
-
-                if (_capabilityProfile != null && _capabilityProfile!.name == 'IMIN-USB') {
-                  _isConnected = false;
-                }
-              }
-            });
-
-            // _runDelayed(1000).then((dynamic v) async {
-            //   await _bluetoothManager.disconnect();
-            //   _isPrinting = false;
-            // });
-
-            // _isConnected = true;
+            if (_capabilityProfile?.name == 'DEVICE') {
+              _isConnected = false;
+            }
             break;
           case BluetoothManager.DISCONNECTED:
             // print('disconnected');
