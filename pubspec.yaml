@@ -20,7 +20,7 @@ dependencies:
 #    path: /Users/lysandergustin/Projects/AndroidStudioProjects/flutter_bluetooth_basic
     git:
       url: https://github.com/rainbowMehBerdaya/flutter_bluetooth_basic.git
-      ref: 22bc68053d0b9a98eb806b5dc0cbad9d75bc8c38
+      ref: 0033fcdbdcf8021279bffec94f7dc229868309c3
 
 dev_dependencies:
   flutter_test:

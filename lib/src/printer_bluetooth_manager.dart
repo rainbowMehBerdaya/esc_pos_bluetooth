@@ -10,6 +10,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:esc_pos_utils/esc_pos_utils.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_bluetooth_basic/flutter_bluetooth_basic.dart';
 import 'package:rxdart/rxdart.dart';
 
@@ -34,7 +35,9 @@ class PrinterBluetooth {
 class PrinterBluetoothManager {
   final BluetoothManager _bluetoothManager = BluetoothManager.instance;
   Timer _disconnectBluetoothTimer = Timer(Duration.zero, () {});
-  Timer _timeoutTimer = Timer(Duration.zero, () {});
+  // Tracks an idle-disconnect that has already fired and is mid-flight, so a
+  // new job can await the real outcome instead of trusting stale state.
+  Future<void>? _pendingDisconnect;
   bool _isPrinting = false;
   bool _isConnected = false;
   bool _supportBLE = true;
@@ -54,10 +57,6 @@ class PrinterBluetoothManager {
   final BehaviorSubject<List<PrinterBluetooth>> _scanResultsNonScan = BehaviorSubject.seeded([]);
 
   Stream<List<PrinterBluetooth>> get scanResultsNonScan => _scanResultsNonScan.stream;
-
-  // Future _runDelayed(int seconds) {
-  //   return Future<dynamic>.delayed(Duration(seconds: seconds));
-  // }
 
   void startScan(Duration timeout) async {
     _scanResults.add(<PrinterBluetooth>[]);
@@ -97,7 +96,6 @@ class PrinterBluetoothManager {
   Future<bool> checkSupportBLE() async {
     try {
       _supportBLE = await _bluetoothManager.checkSupportBLE();
-      // _supportBLE = false;
       return _supportBLE;
     } catch (e) {
       throw e;
@@ -142,33 +140,39 @@ class PrinterBluetoothManager {
       return Future<PosPrintResult>.value(PosPrintResult.printerNotSelected);
     } else if (_isScanning.value) {
       return Future<PosPrintResult>.value(PosPrintResult.scanInProgress);
+    } else if (_isPrinting) {
+      // Reject overlapping jobs instead of letting two writeChunked() loops
+      // race on the same connection: with the blocking sleep() removed below,
+      // two concurrent loops can genuinely interleave writes on the wire.
+      return Future<PosPrintResult>.value(PosPrintResult.printInProgress);
     }
-    // else if (_isPrinting) {
-    //   return Future<PosPrintResult>.value(PosPrintResult.printInProgress);
-    // }
 
     _isPrinting = true;
 
+    // Always disarm the idle-disconnect timer before starting a job.
+    // A timer armed by the previous job would otherwise fire mid-connect or
+    // mid-write and drop the connection.
+    if (_disconnectBluetoothTimer.isActive) {
+      _disconnectBluetoothTimer.cancel();
+    }
+
+    // Timer.isActive flips to false the instant the timer FIRES, not once its
+    // async callback finishes — so a fired-but-still-running disconnect could
+    // otherwise race a new job: _isConnected would look stale-true here, this
+    // job would skip reconnecting, and then the in-flight disconnect would
+    // pull the connection out from under it. Wait for it to actually finish.
+    if (_pendingDisconnect != null) {
+      await _pendingDisconnect;
+    }
+
     if (_changeConnection) {
-      // print('changeConnection: $_changeConnection');
       _changeConnection = false;
-      if (_disconnectBluetoothTimer.isActive) {
-        _disconnectBluetoothTimer.cancel();
-      }
 
       if (_isConnected) {
-        // print('_isConnected: $_isConnected');
         await _bluetoothManager.disconnect();
 
         if (Platform.isAndroid) {
-          final bool _isBluetoothDisconnectSuccess = await _bluetoothDisconnectSuccess();
-
-          // _isBluetoothDisconnectSuccess is still not utilize
-          // if (_isBluetoothDisconnectSuccess) {
-          //   print('success');
-          // } else {
-          //   print('failed');
-          // }
+          await _bluetoothDisconnectSuccess();
         }
 
         _isConnected = false;
@@ -190,10 +194,47 @@ class PrinterBluetoothManager {
       }
     }
 
-    // ISSUE WITH IOS, PRINT MULTIPLE TIMES
+    StreamSubscription<int?>? stateSubscription;
+    Timer? timeoutTimer;
+    // The state stream can emit CONNECTED more than once per job; this guard
+    // makes sure the ticket is transmitted at most once.
+    bool hasWritten = false;
+    // Future.delayed (unlike the old blocking sleep()) lets the timeout timer
+    // fire while writeChunked() is still mid-loop. This flag lets the loop
+    // notice and stop, and lets the CONNECTED handler skip its post-write
+    // steps (arming the disconnect timer, completing success) for a job that
+    // has already been reported to the caller as timed out.
+    bool isFinished = false;
+
+    void finish(PosPrintResult result) {
+      _isPrinting = false;
+      isFinished = true;
+      timeoutTimer?.cancel();
+      // Cancel the subscription so listeners do not accumulate across jobs.
+      // Leaked listeners caused duplicate writes and double completions.
+      stateSubscription?.cancel();
+      if (!completer.isCompleted) {
+        completer.complete(result);
+      }
+    }
+
+    Future<void> writeChunked() async {
+      final len = bytes.length;
+      for (var i = 0; i < len; i += chunkSizeBytes) {
+        if (isFinished) {
+          return;
+        }
+        final end = (i + chunkSizeBytes < len) ? i + chunkSizeBytes : len;
+        await _bluetoothManager.writeData(bytes.sublist(i, end));
+        // Yield to the event loop between chunks; dart:io sleep() blocked the
+        // whole isolate, freezing the UI and the platform channel events this
+        // class depends on.
+        await Future.delayed(Duration(milliseconds: queueSleepTimeMs));
+      }
+    }
+
     if (Platform.isAndroid) {
-      // Subscribe to the events
-      _bluetoothManager.state.listen((state) async {
+      stateSubscription = _bluetoothManager.state.listen((state) async {
         switch (state) {
           case 12:
             if (_isConnected) {
@@ -213,54 +254,43 @@ class PrinterBluetoothManager {
           case BluetoothManager.CONNECTED:
             _isConnected = true;
 
-            final len = bytes.length;
-            List<List<int>> chunks = [];
-            for (var i = 0; i < len; i += chunkSizeBytes) {
-              var end = (i + chunkSizeBytes < len) ? i + chunkSizeBytes : len;
-              chunks.add(bytes.sublist(i, end));
+            if (hasWritten) {
+              break;
+            }
+            hasWritten = true;
+
+            try {
+              await writeChunked();
+            } catch (e) {
+              // "not_connected" means the platform's port was already closed
+              // even though we believed we were connected; clear the stale
+              // flag so the next job reconnects instead of repeating this
+              // same failure. Report failure instead of leaking an
+              // unhandled async error.
+              if (e is PlatformException && e.code == 'not_connected') {
+                _isConnected = false;
+              }
+              finish(PosPrintResult.timeout);
+              break;
             }
 
-            for (var i = 0; i < chunks.length; i += 1) {
-              await _bluetoothManager.writeData(chunks[i]);
-              sleep(Duration(milliseconds: queueSleepTimeMs));
+            if (isFinished) {
+              // The 12s timeout already fired while writeChunked() was still
+              // running; the caller has been told this job failed, so don't
+              // arm a fresh disconnect timer or complete the (already
+              // completed) completer with success.
+              break;
             }
-
-            // print('success');
-            completer.complete(PosPrintResult.success);
-            _isPrinting = false;
 
             if (_capabilityProfile?.name != 'DEVICE') {
-              // TODO sending disconnect signal should be event-based
-              if (_disconnectBluetoothTimer.isActive) {
-                _disconnectBluetoothTimer.cancel();
-              }
-
-              _disconnectBluetoothTimer = Timer(Duration(seconds: 10), () async {
-                // print('disconnectBluetoothTimer');
-                if (_isConnected) {
-                  // print('disconnect');
-                  await _bluetoothManager.disconnect();
-
-                  if (_capabilityProfile != null && _capabilityProfile!.name == 'IMIN-USB') {
-                    _isConnected = false;
-                  }
-                }
-              });
-
-              // _runDelayed(1000).then((dynamic v) async {
-              //   await _bluetoothManager.disconnect();
-              //   _isPrinting = false;
-              // });
-
-              // _isConnected = true;
-            }
-
-            if (_capabilityProfile?.name == 'DEVICE') {
+              _armDisconnectTimer();
+            } else {
               _isConnected = false;
             }
+
+            finish(PosPrintResult.success);
             break;
           case BluetoothManager.DISCONNECTED:
-            // print('disconnected');
             _isConnected = false;
             break;
           default:
@@ -268,11 +298,7 @@ class PrinterBluetoothManager {
         }
       });
     } else if (Platform.isIOS) {
-      // Subscribe to the events
-      _bluetoothManager.state.listen((state) async {
-        // print('state: $state');
-        // print('_isConnected: $_isConnected');
-        // print('_isPrinting: $_isPrinting');
+      stateSubscription = _bluetoothManager.state.listen((state) async {
         switch (state) {
           case null:
             if (_isConnected) {
@@ -283,43 +309,28 @@ class PrinterBluetoothManager {
           case BluetoothManager.CONNECTED:
             _isConnected = true;
 
-            if (_isPrinting == true) {
-              final len = bytes.length;
-              List<List<int>> chunks = [];
-              for (var i = 0; i < len; i += chunkSizeBytes) {
-                var end = (i + chunkSizeBytes < len) ? i + chunkSizeBytes : len;
-                chunks.add(bytes.sublist(i, end));
-              }
+            if (hasWritten) {
+              break;
+            }
+            hasWritten = true;
 
-              for (var i = 0; i < chunks.length; i += 1) {
-                await _bluetoothManager.writeData(chunks[i]);
-                sleep(Duration(milliseconds: queueSleepTimeMs));
+            try {
+              await writeChunked();
+            } catch (e) {
+              if (e is PlatformException && e.code == 'not_connected') {
+                _isConnected = false;
               }
+              finish(PosPrintResult.timeout);
+              break;
             }
 
-            // print('success');
-            completer.complete(PosPrintResult.success);
-            _isPrinting = false;
-
-            // TODO sending disconnect signal should be event-based
-            if (_disconnectBluetoothTimer.isActive) {
-              _disconnectBluetoothTimer.cancel();
+            if (isFinished) {
+              break;
             }
 
-            _disconnectBluetoothTimer = Timer(Duration(seconds: 10), () async {
-              // print('disconnectBluetoothTimer');
-              if (_isConnected) {
-                // print('disconnect');
-                await _bluetoothManager.disconnect();
-              }
-            });
+            _armDisconnectTimer();
 
-            // _runDelayed(1000).then((dynamic v) async {
-            //   await _bluetoothManager.disconnect();
-            //   _isPrinting = false;
-            // });
-
-            // _isConnected = true;
+            finish(PosPrintResult.success);
             break;
           case BluetoothManager.DISCONNECTED:
             _isConnected = false;
@@ -331,28 +342,33 @@ class PrinterBluetoothManager {
     }
 
     // Printing timeout
-    if (_timeoutTimer.isActive) {
-      _timeoutTimer.cancel();
-    }
-
-    _timeoutTimer = Timer(Duration(seconds: timeout), () async {
-      // print('timeoutTimer');
-      // print('_isPrinting: $_isPrinting');
-      if (_isPrinting) {
-        _isPrinting = false;
-        // print('timeout');
-        completer.complete(PosPrintResult.timeout);
-      }
+    timeoutTimer = Timer(Duration(seconds: timeout), () {
+      finish(PosPrintResult.timeout);
     });
 
-    // _runDelayed(timeout).then((dynamic v) async {
-    //   if (_isPrinting) {
-    //     _isPrinting = false;
-    //     completer.complete(PosPrintResult.timeout);
-    //   }
-    // });
-
     return completer.future;
+  }
+
+  // TODO sending disconnect signal should be event-based
+  void _armDisconnectTimer() {
+    if (_disconnectBluetoothTimer.isActive) {
+      _disconnectBluetoothTimer.cancel();
+    }
+
+    _disconnectBluetoothTimer = Timer(Duration(seconds: 10), () {
+      _pendingDisconnect = _disconnectIfConnected();
+    });
+  }
+
+  Future<void> _disconnectIfConnected() async {
+    if (_isConnected) {
+      await _bluetoothManager.disconnect();
+      // We initiated this disconnect, so mark the connection closed for all
+      // profiles. Leaving _isConnected true made the next job skip connect()
+      // and wait for a CONNECTED event that never arrives.
+      _isConnected = false;
+    }
+    _pendingDisconnect = null;
   }
 
   Future<PosPrintResult> printTicket(
@@ -372,22 +388,25 @@ class PrinterBluetoothManager {
 
   Future<bool> _bluetoothDisconnectSuccess() async {
     final Completer<bool> completer = Completer();
+    StreamSubscription<int?>? stateSubscription;
+    Timer? timeoutTimer;
 
-    if (Platform.isAndroid) {
-      // Subscribe to the events
-      _bluetoothManager.state.listen((state) async {
-        switch (state) {
-          case BluetoothManager.DISCONNECTED:
-            completer.complete(true);
-            break;
-          default:
-            break;
-        }
-      });
+    void finish(bool result) {
+      timeoutTimer?.cancel();
+      stateSubscription?.cancel();
+      if (!completer.isCompleted) {
+        completer.complete(result);
+      }
     }
 
-    _timeoutTimer = Timer(Duration(seconds: 5), () async {
-      completer.complete(false);
+    stateSubscription = _bluetoothManager.state.listen((state) {
+      if (state == BluetoothManager.DISCONNECTED) {
+        finish(true);
+      }
+    });
+
+    timeoutTimer = Timer(Duration(seconds: 5), () {
+      finish(false);
     });
 
     return completer.future;
